@@ -25,6 +25,10 @@ button{font:inherit;width:100%;border:0;border-radius:10px;padding:14px;font-siz
 .b2{background:var(--panel);color:#fff;border:1px solid var(--line)}
 button:disabled{opacity:.5}
 .hide{display:none}
+label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+textarea{width:100%;font:inherit;font-size:16px;color:#fff;background:#0A1628;border:1px solid var(--line);border-radius:10px;padding:10px;min-height:70px;resize:vertical}
+.count{font-size:12px;color:var(--muted);text-align:right}
+.row{display:flex;gap:8px}.row button{flex:1}
 </style>
 </head>
 <body>
@@ -39,6 +43,20 @@ button:disabled{opacity:.5}
   <button id="sharePost" class="b1" disabled>Share as post</button>
   <button id="shareStory" class="b2" disabled>Share as story</button>
   <p class="hint" id="shareHint">Post: Instagram and LinkedIn. Story: WhatsApp Status and Instagram Stories.</p>
+  <button id="editBtn" class="b2">Edit text</button>
+  <div id="editPanel" class="box hide">
+    <div class="hint">Change the wording. The photo and card style stay the same.</div>
+    <label for="eHead">Headline</label>
+    <textarea id="eHead" maxlength="70" rows="2"></textarea>
+    <div class="count" id="cHead"></div>
+    <label for="eBody">Main text</label>
+    <textarea id="eBody" maxlength="220" rows="4"></textarea>
+    <div class="count" id="cBody"></div>
+    <div class="row" style="margin-top:10px">
+      <button id="resetBtn" class="b2">Back to original</button>
+      <button id="doneBtn" class="b1">Done</button>
+    </div>
+  </div>
 </div>
 <canvas id="cv" class="hide"></canvas>
 
@@ -249,15 +267,47 @@ async function main(){
   if (n >= N-10){ $("warnText").textContent = left>0 ? "Only "+left+" new cards left after this one. Ask for a top up." : "This is the last card. Ask for a top up."; $("warnText").classList.remove("hide"); }
   const photo = new Image(); photo.src = "photos/p"+String(pnum).padStart(2,"0")+".jpg";
   await photo.decode().catch(()=>{});
-  const stamp = new Date(cardDay).toISOString().slice(0,10);
-  const post = render(card, photo, false);
-  $("preview").src = post.toDataURL("image/jpeg",0.9);
-  files.post = new File([await toBlob(post)], "card-"+stamp+"-post.png", {type:"image/png"});
-  const story = render(card, photo, true);
-  files.story = new File([await toBlob(story)], "card-"+stamp+"-story.png", {type:"image/png"});
+  STATE.original = card; STATE.photo = photo; STATE.stamp = new Date(cardDay).toISOString().slice(0,10);
+  let saved = null; try{ saved = JSON.parse(localStorage.getItem("oc_edit_"+STATE.stamp)||"null"); }catch(e){}
+  STATE.card = Object.assign({}, card, saved||{});
+  if (saved && saved.body && saved.body !== card.body) STATE.card.src = "";
+  $("eHead").value = STATE.card.head; $("eBody").value = STATE.card.body; counts();
+  await rebuild();
   $("cardArea").classList.remove("hide");
+}
+
+// Rebuild the preview and the two ready made share files from the current text.
+const STATE = {};
+let buildNo = 0;
+async function rebuild(){
+  const my = ++buildNo;
+  $("sharePost").disabled=true; $("shareStory").disabled=true;
+  const post = render(STATE.card, STATE.photo, false);
+  $("preview").src = post.toDataURL("image/jpeg",0.9);
+  const pBlob = await toBlob(post);
+  const story = render(STATE.card, STATE.photo, true);
+  const sBlob = await toBlob(story);
+  if (my !== buildNo) return;   // a newer edit started; that one will finish the job
+  files.post = new File([pBlob], "card-"+STATE.stamp+"-post.png", {type:"image/png"});
+  files.story = new File([sBlob], "card-"+STATE.stamp+"-story.png", {type:"image/png"});
   $("sharePost").disabled=false; $("shareStory").disabled=false;
 }
+function counts(){ $("cHead").textContent = $("eHead").value.length+" / 70"; $("cBody").textContent = $("eBody").value.length+" / 220"; }
+let timer=null;
+function onEdit(){
+  counts();
+  const body = $("eBody").value.trim() || STATE.original.body;
+  // If he rewrites the main text, the source line may no longer match, so it is dropped.
+  STATE.card = Object.assign({}, STATE.original, {head: $("eHead").value.trim() || STATE.original.head, body, src: body===STATE.original.body ? STATE.original.src : ""});
+  try{ localStorage.setItem("oc_edit_"+STATE.stamp, JSON.stringify({head:STATE.card.head, body:STATE.card.body})); }catch(e){}
+  $("sharePost").disabled=true; $("shareStory").disabled=true;
+  clearTimeout(timer); timer=setTimeout(rebuild, 350);
+}
+$("eHead").addEventListener("input",onEdit);
+$("eBody").addEventListener("input",onEdit);
+$("editBtn").addEventListener("click",()=>{ $("editPanel").classList.remove("hide"); $("editBtn").classList.add("hide"); $("eHead").focus(); });
+$("doneBtn").addEventListener("click",async()=>{ clearTimeout(timer); await rebuild(); $("editPanel").classList.add("hide"); $("editBtn").classList.remove("hide"); window.scrollTo({top:0,behavior:"smooth"}); });
+$("resetBtn").addEventListener("click",()=>{ $("eHead").value=STATE.original.head; $("eBody").value=STATE.original.body; try{ localStorage.removeItem("oc_edit_"+STATE.stamp); }catch(e){} onEdit(); try{ localStorage.removeItem("oc_edit_"+STATE.stamp); }catch(e){} });
 $("sharePost").addEventListener("click",()=>share("post"));
 $("shareStory").addEventListener("click",()=>share("story"));
 main();
